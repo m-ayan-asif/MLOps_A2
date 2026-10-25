@@ -180,9 +180,6 @@ class LLMClient:
     def _discover_fallback_models(self) -> list[str]:
         if self._fallback_models is not None:
             return self._fallback_models
-        if self._api_calls >= config.MAX_LLM_API_CALLS - 1:
-            self._fallback_models = []
-            return self._fallback_models
 
         list_models = getattr(self._client.models, "list", None)
         if list_models is None:
@@ -225,19 +222,13 @@ class LLMClient:
         return LLMError(f"Gemini API error: {self._scrub(exc)}{hint}")
 
     def _generate(self, messages: list[dict], cfg):
-        if self._api_calls >= config.MAX_LLM_API_CALLS:
-            raise LLMError(
-                f"Gemini API call limit reached ({config.MAX_LLM_API_CALLS} requests per audit)"
-            )
-
         current_model = self.model
         attempted_models = {current_model}
         current_attempts = 0
-        last_error = None
         fallback_ready = False
         primary_attempt_limit = self.retries
 
-        while self._api_calls < config.MAX_LLM_API_CALLS:
+        while True:
             current_attempts += 1
             self._api_calls += 1
             try:
@@ -249,7 +240,6 @@ class LLMClient:
                 self.model = current_model
                 return response, current_model
             except Exception as exc:  # noqa: BLE001 - classified below
-                last_error = exc
                 unavailable = _is_retryable(exc) or getattr(exc, "code", None) == 404
                 if not unavailable:
                     raise self._request_error(exc, current_model) from None
@@ -278,18 +268,13 @@ class LLMClient:
                 may_retry_current = (
                     _is_retryable(exc)
                     and current_attempts < primary_attempt_limit
-                    and self._api_calls < config.MAX_LLM_API_CALLS
-                    and (
-                        not available_fallbacks
-                        or self._api_calls < config.MAX_LLM_API_CALLS - min(len(available_fallbacks), 1)
-                    )
                 )
                 if may_retry_current:
                     delay = min(30.0, 2.0 * 2 ** (current_attempts - 1)) + random.random()
                     self._sleep(delay)
                     continue
 
-                if available_fallbacks and self._api_calls < config.MAX_LLM_API_CALLS:
+                if available_fallbacks:
                     unavailable_model = current_model
                     current_model = available_fallbacks[0]
                     attempted_models.add(current_model)
@@ -303,10 +288,6 @@ class LLMClient:
                     continue
 
                 raise self._request_error(exc, current_model) from None
-
-        if last_error is not None:
-            raise self._request_error(last_error, current_model) from None
-        raise LLMError("Gemini API error: request budget exhausted")
 
     def _scrub(self, exc: BaseException) -> str:
         msg = f"{type(exc).__name__}: {exc}"

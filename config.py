@@ -13,7 +13,6 @@ from errors import ConfigError
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
 LLM_TIMEOUT = 300          # seconds per API request
 LLM_RETRIES = 5            # attempts per request (exponential backoff)
-MAX_LLM_API_CALLS = 5      # total generate_content requests per audit, including retries
 
 # ---- Agent loop ------------------------------------------------------------
 MAX_STEPS = 30                 # LLM turns before we force a final report

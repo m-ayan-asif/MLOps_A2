@@ -123,7 +123,6 @@ def test_retries_then_succeeds():
 
 
 def test_unavailable_model_falls_back_to_available_flash(monkeypatch, capsys):
-    monkeypatch.setattr(config, "MAX_LLM_API_CALLS", 5)
     ok = model_response(types.Part(text="fallback response"))
     available = [
         SimpleNamespace(name="models/gemini-2.5-flash", supported_actions=["generateContent"]),
@@ -150,7 +149,6 @@ def test_unavailable_model_falls_back_to_available_flash(monkeypatch, capsys):
 
 
 def test_fallback_tries_each_listed_model_until_one_succeeds(monkeypatch):
-    monkeypatch.setattr(config, "MAX_LLM_API_CALLS", 5)
     ok = model_response(types.Part(text="success"))
     available = [
         SimpleNamespace(name="models/gemini-3.8-flash-preview", supported_actions=["generateContent"]),
@@ -170,7 +168,6 @@ def test_fallback_tries_each_listed_model_until_one_succeeds(monkeypatch):
 
 
 def test_fallback_skips_retired_model_and_tries_next(monkeypatch):
-    monkeypatch.setattr(config, "MAX_LLM_API_CALLS", 5)
     ok = model_response(types.Part(text="success"))
     available = [
         SimpleNamespace(name="models/gemini-3.8-flash", supported_actions=["generateContent"]),
@@ -216,17 +213,16 @@ def test_retries_exhausted_raises_llm_error():
     assert fake.models.calls == 3
 
 
-def test_total_api_call_budget_includes_retries_across_chat_calls(monkeypatch):
-    monkeypatch.setattr(config, "MAX_LLM_API_CALLS", 5)
+def test_chat_calls_can_exceed_five_requests():
     ok = model_response(types.Part(text="ok"))
-    c, fake, _ = client([ok, APIErr(503), APIErr(503), APIErr(503), APIErr(503), ok], retries=5)
-    c.chat([{"role": "user", "content": "first"}], "s", tool_schemas.TOOL_DECLARATIONS)
-    with pytest.raises(LLMError, match="Gemini API error"):
-        c.chat([{"role": "user", "content": "second"}], "s", tool_schemas.TOOL_DECLARATIONS)
-    with pytest.raises(LLMError, match="call limit reached"):
-        c.chat([{"role": "user", "content": "third"}], "s", tool_schemas.TOOL_DECLARATIONS)
-    assert fake.models.calls == 4
-    assert c._api_calls == 5
+    c, fake, _ = client([ok] * 6)
+
+    for _ in range(6):
+        response = c.chat([{"role": "user", "content": "x"}], "s", tool_schemas.TOOL_DECLARATIONS)
+        assert response.text == "ok"
+
+    assert fake.models.calls == 6
+    assert c._api_calls == 6
 
 
 def test_default_model_is_gemini_flash_lite(monkeypatch):
