@@ -197,7 +197,11 @@ class LLMClient:
                 ):
                     continue
                 name = name.removeprefix("models/")
-                if name and name != self._preferred_model:
+                if (
+                    name
+                    and name != self._preferred_model
+                    and "image" not in name.lower()
+                ):
                     candidates.append(name)
         except Exception as exc:  # noqa: BLE001 - model discovery is an API operation
             raise LLMError(

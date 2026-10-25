@@ -128,6 +128,7 @@ def test_unavailable_model_falls_back_to_available_flash(monkeypatch, capsys):
     available = [
         SimpleNamespace(name="models/gemini-pro", supported_actions=["generateContent"]),
         SimpleNamespace(name="models/gemini-3.8-flash", supported_actions=["generateContent"]),
+        SimpleNamespace(name="models/gemini-2.5-flash-image", supported_actions=["generateContent"]),
         SimpleNamespace(name="models/gemini-image", supported_actions=["predict"]),
     ]
     c, fake, _ = client(
