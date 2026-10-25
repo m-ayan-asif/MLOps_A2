@@ -71,6 +71,13 @@ def _is_retryable(exc: BaseException) -> bool:
     return any(cls.__name__ in _RETRYABLE_NAMES for cls in type(exc).__mro__)
 
 
+def _is_multiturn_unsupported(exc: BaseException) -> bool:
+    return (
+        getattr(exc, "code", None) == 400
+        and "multiturn chat is not enabled for this model" in str(exc).lower()
+    )
+
+
 def _plain(obj: Any) -> Any:
     try:
         return json.loads(json.dumps(obj, default=str))
@@ -205,6 +212,7 @@ class LLMClient:
                     name
                     and name != self._preferred_model
                     and "image" not in name.lower()
+                    and not re.search(r"(?:^|[-_])tts(?:[-_.]|$)", name, re.IGNORECASE)
                 ):
                     candidates.append(name)
         except Exception as exc:  # noqa: BLE001 - model discovery is an API operation
@@ -240,7 +248,12 @@ class LLMClient:
                 self.model = current_model
                 return response, current_model
             except Exception as exc:  # noqa: BLE001 - classified below
-                unavailable = _is_retryable(exc) or getattr(exc, "code", None) == 404
+                multiturn_unsupported = _is_multiturn_unsupported(exc)
+                unavailable = (
+                    _is_retryable(exc)
+                    or getattr(exc, "code", None) == 404
+                    or multiturn_unsupported
+                )
                 if not unavailable:
                     raise self._request_error(exc, current_model) from None
 
@@ -281,7 +294,8 @@ class LLMClient:
                     current_attempts = 0
                     primary_attempt_limit = 1
                     print(
-                        f"warning: Gemini model {unavailable_model!r} is unavailable; "
+                        f"warning: Gemini model {unavailable_model!r} "
+                        f"{'does not support multi-turn chat' if multiturn_unsupported else 'is unavailable'}; "
                         f"trying fallback {current_model!r}",
                         file=sys.stderr,
                     )

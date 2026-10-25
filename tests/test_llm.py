@@ -128,6 +128,7 @@ def test_unavailable_model_falls_back_to_available_flash(monkeypatch, capsys):
         SimpleNamespace(name="models/gemini-2.5-flash", supported_actions=["generateContent"]),
         SimpleNamespace(name="models/gemini-pro", supported_actions=["generateContent"]),
         SimpleNamespace(name="models/gemini-3.8-flash", supported_actions=["generateContent"]),
+        SimpleNamespace(name="models/gemini-3.8-flash-lite-tts", supported_actions=["generateContent"]),
         SimpleNamespace(name="models/gemini-2.5-flash-image", supported_actions=["generateContent"]),
         SimpleNamespace(name="models/gemini-image", supported_actions=["predict"]),
     ]
@@ -184,6 +185,45 @@ def test_fallback_skips_retired_model_and_tries_next(monkeypatch):
     assert response.text == "success"
     assert response.model == "gemini-3.1-flash"
     assert fake.models.called_models == ["m", "m", "gemini-3.8-flash", "gemini-3.1-flash"]
+
+
+def test_fallback_skips_model_without_multiturn_chat(capsys):
+    first_response = model_response(
+        types.Part(function_call=types.FunctionCall(name="list_files", args={"reason": "inspect"}))
+    )
+    final_response = model_response(types.Part(text="done"))
+    available = [
+        SimpleNamespace(name="models/gemini-3.8-flash", supported_actions=["generateContent"]),
+        SimpleNamespace(name="models/gemini-3.1-flash", supported_actions=["generateContent"]),
+    ]
+    c, fake, _ = client(
+        [
+            APIErr(503),
+            APIErr(503),
+            first_response,
+            APIErr(400, "Multiturn chat is not enabled for this model"),
+            final_response,
+        ],
+        available_models=available,
+    )
+
+    first = c.chat([{"role": "user", "content": "inspect"}], "sys", tool_schemas.TOOL_DECLARATIONS)
+    second = c.chat(
+        [
+            {"role": "user", "content": "inspect"},
+            first.to_message(),
+            {"role": "tool", "name": "list_files", "tool_call_id": first.tool_calls[0].id, "content": "README.md"},
+        ],
+        "sys",
+        tool_schemas.TOOL_DECLARATIONS,
+    )
+
+    assert second.text == "done"
+    assert second.model == "gemini-3.1-flash"
+    assert fake.models.called_models == [
+        "m", "m", "gemini-3.8-flash", "gemini-3.8-flash", "gemini-3.1-flash",
+    ]
+    assert "does not support multi-turn chat" in capsys.readouterr().err
 
 
 def test_model_fallback_rebuilds_other_models_assistant_turns():

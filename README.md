@@ -181,8 +181,9 @@ to use another compatible model. There is no fixed per-audit Gemini API request 
 step limit bounds the number of LLM turns, and retries for an individual request are bounded.
 If the selected model is unavailable or overloaded, the agent checks which models available to
 your API key support content generation, prioritizes newer model versions and flash variants,
-skips image models, and continues to the next candidate if a listed model is retired. Once a
-fallback succeeds, it is used for the rest of the audit.
+skips image and TTS-only models, and continues to the next candidate if a listed model is retired
+or does not support the multi-turn chat required by the tool loop. Once a fallback succeeds, it is
+used for the rest of the audit.
 
 ## Run the tests
 
