@@ -149,9 +149,9 @@ def test_argparse_requires_repo(capsys):
     assert e.value.code != 0
 
 
-def test_output_defaults_to_report_json(monkeypatch, tmp_path, healthy_repo):
+def test_output_defaults_to_sample_report_json(monkeypatch, tmp_path, healthy_repo):
     monkeypatch.chdir(tmp_path)
     patch_clone(monkeypatch, healthy_repo)
     patch_llm(monkeypatch, full_run([], inspect_private_key=False))
     assert agent.main(["--repo", URL, "--trace", str(tmp_path / "t.jsonl")]) == 0
-    assert (tmp_path / "report.json").exists()
+    assert (tmp_path / "sample_report.json").exists()

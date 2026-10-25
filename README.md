@@ -133,13 +133,13 @@ environment takes precedence over the value in `.env`.
 **Windows PowerShell**
 
 ```powershell
-.\.venv\Scripts\python.exe agent.py --repo https://github.com/owner/repository --output report.json
+.\.venv\Scripts\python.exe agent.py --repo https://github.com/owner/repository
 ```
 
 **macOS, Linux, or WSL**
 
 ```bash
-./.venv/bin/python agent.py --repo https://github.com/owner/repository --output report.json
+./.venv/bin/python agent.py --repo https://github.com/owner/repository
 ```
 
 Replace `owner/repository` with the path of a **public GitHub repository**. Only HTTPS GitHub
@@ -147,7 +147,7 @@ repository URLs are accepted; private repositories and other Git hosts are not s
 
 Options:
 
-- `--output PATH`: JSON report path (default: `report.json`)
+- `--output PATH`: JSON report path (default: `sample_report.json`)
 - `--trace PATH`: tool-call trace path (default: `trace.jsonl`)
 - `--max-steps N`: maximum LLM turns (default: 30)
 
@@ -239,19 +239,19 @@ testing, ci_cd, security, configuration, collaboration, build_release.
 
 ## Generating `sample_report.json`
 
-`sample_report.json` is an example report produced by the agent. To replace it with output from a
-new audit, run:
+By default, an audit writes its report to `sample_report.json`, which is included as an authentic
+example output. To generate a new sample report, run:
 
 **Windows PowerShell**
 
 ```powershell
-.\.venv\Scripts\python.exe agent.py --repo https://github.com/owner/repository --output sample_report.json
+.\.venv\Scripts\python.exe agent.py --repo https://github.com/owner/repository
 ```
 
 **macOS, Linux, or WSL**
 
 ```bash
-./.venv/bin/python agent.py --repo https://github.com/owner/repository --output sample_report.json
+./.venv/bin/python agent.py --repo https://github.com/owner/repository
 ```
 
 ## Limitations

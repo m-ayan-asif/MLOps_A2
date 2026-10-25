@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI entry point:  python agent.py --repo <github_url> --output report.json"""
+"""CLI entry point:  python agent.py --repo <github_url>"""
 from __future__ import annotations
 
 import argparse
@@ -22,7 +22,10 @@ def build_parser() -> argparse.ArgumentParser:
         description="AI agent that audits a public GitHub repository for DevOps best-practice violations.",
     )
     p.add_argument("--repo", required=True, help="public repository URL, e.g. https://github.com/owner/repo")
-    p.add_argument("--output", default="report.json", help="path of the JSON report to write (default: report.json)")
+    p.add_argument(
+        "--output", default="sample_report.json",
+        help="path of the JSON report to write (default: sample_report.json)",
+    )
     p.add_argument("--trace", default="trace.jsonl", help="path of the tool-call trace (JSONL); default trace.jsonl")
     p.add_argument("--max-steps", type=int, default=config.MAX_STEPS, help="maximum LLM turns")
     return p
