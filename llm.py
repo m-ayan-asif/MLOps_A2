@@ -13,6 +13,7 @@ from __future__ import annotations
 import itertools
 import json
 import random
+import sys
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
@@ -34,14 +35,18 @@ class LLMResponse:
     text: str = ""
     tool_calls: list = field(default_factory=list)
     raw: Any = None
+    model: Optional[str] = None
 
     def to_message(self) -> dict:
-        return {
+        message = {
             "role": "assistant",
             "content": self.text,
             "tool_calls": [{"id": c.id, "name": c.name, "args": c.args} for c in self.tool_calls],
             "raw": self.raw,
         }
+        if self.model is not None:
+            message["model"] = self.model
+        return message
 
 
 _RETRYABLE_CODES = {408, 429, 500, 502, 503, 504}
@@ -78,8 +83,10 @@ class LLMClient:
     ):
         self.api_key = api_key
         self.model = model
+        self._preferred_model = model
         self.retries = max(1, retries)
         self._api_calls = 0
+        self._fallback_models: Optional[list[str]] = None
         self._sleep = sleep
         self._ids = itertools.count(1)
         from google.genai import types  # imported lazily so tests of other modules need no SDK
@@ -96,8 +103,8 @@ class LLMClient:
     # ---------------------------------------------------------------- public API
     def chat(self, messages: list[dict], system: str, tools: list[dict]) -> LLMResponse:
         cfg = self._config(system, tools)
-        response = self._generate(self._to_contents(messages), cfg)
-        return self._parse(response)
+        response, model = self._generate(messages, cfg)
+        return self._parse(response, model)
 
     # ------------------------------------------------------------------ building
     def _config(self, system: str, tools: list[dict]):
@@ -115,7 +122,7 @@ class LLMClient:
             automatic_function_calling=t.AutomaticFunctionCallingConfig(disable=True),
         )
 
-    def _to_contents(self, messages: list[dict]) -> list:
+    def _to_contents(self, messages: list[dict], model: Optional[str] = None) -> list:
         t = self._types
         contents: list = []
         pending: list = []  # consecutive user/tool messages merge into ONE user Content
@@ -141,7 +148,8 @@ class LLMClient:
                 )
             elif role == "assistant":
                 flush()
-                if m.get("raw") is not None:
+                message_model = m.get("model", self._preferred_model)
+                if m.get("raw") is not None and (model is None or message_model == model):
                     contents.append(m["raw"])
                     continue
                 parts = []
@@ -162,34 +170,139 @@ class LLMClient:
         return contents
 
     # --------------------------------------------------------------- API call
-    def _generate(self, contents: list, cfg):
+    def _discover_fallback_models(self) -> list[str]:
+        if self._fallback_models is not None:
+            return self._fallback_models
+        if self._api_calls >= config.MAX_LLM_API_CALLS - 1:
+            self._fallback_models = []
+            return self._fallback_models
+
+        list_models = getattr(self._client.models, "list", None)
+        if list_models is None:
+            self._fallback_models = []
+            return self._fallback_models
+
+        self._api_calls += 1
+        try:
+            models = list_models(config={"page_size": 100})
+            candidates = []
+            for model in itertools.islice(models, 100):
+                name = getattr(model, "name", None)
+                actions = getattr(model, "supported_actions", None) or []
+                if isinstance(actions, str):
+                    actions = [actions]
+                if not isinstance(name, str) or not any(
+                    isinstance(action, str) and action.lower() == "generatecontent"
+                    for action in actions
+                ):
+                    continue
+                name = name.removeprefix("models/")
+                if name and name != self._preferred_model:
+                    candidates.append(name)
+        except Exception as exc:  # noqa: BLE001 - model discovery is an API operation
+            raise LLMError(
+                f"Gemini API error while discovering fallback models: {self._scrub(exc)}"
+            ) from None
+
+        self._fallback_models = sorted(
+            set(candidates),
+            key=lambda name: (
+                "flash" not in name.lower(),
+                "preview" in name.lower(),
+                name.lower(),
+            ),
+        )
+        return self._fallback_models
+
+    def _request_error(self, exc: BaseException, model: str) -> LLMError:
+        hint = ""
+        if getattr(exc, "code", None) == 404:
+            hint = f" (is LLM_MODEL={model!r} still available?)"
+        return LLMError(f"Gemini API error: {self._scrub(exc)}{hint}")
+
+    def _generate(self, messages: list[dict], cfg):
         if self._api_calls >= config.MAX_LLM_API_CALLS:
             raise LLMError(
                 f"Gemini API call limit reached ({config.MAX_LLM_API_CALLS} requests per audit)"
             )
-        for attempt in range(1, self.retries + 1):
-            if self._api_calls >= config.MAX_LLM_API_CALLS:
-                raise LLMError(
-                    f"Gemini API call limit reached ({config.MAX_LLM_API_CALLS} requests per audit)"
-                )
+
+        current_model = self.model
+        attempted_models = {current_model}
+        current_attempts = 0
+        last_error = None
+        fallback_ready = False
+        primary_attempt_limit = self.retries
+
+        while self._api_calls < config.MAX_LLM_API_CALLS:
+            current_attempts += 1
             self._api_calls += 1
             try:
-                return self._client.models.generate_content(
-                    model=self.model, contents=contents, config=cfg
+                response = self._client.models.generate_content(
+                    model=current_model,
+                    contents=self._to_contents(messages, model=current_model),
+                    config=cfg,
                 )
+                self.model = current_model
+                return response, current_model
             except Exception as exc:  # noqa: BLE001 - classified below
-                if (
-                    not _is_retryable(exc)
-                    or attempt == self.retries
-                    or self._api_calls >= config.MAX_LLM_API_CALLS
-                ):
-                    hint = ""
-                    if getattr(exc, "code", None) == 404:
-                        hint = f" (is LLM_MODEL={self.model!r} still available?)"
-                    raise LLMError(f"Gemini API error: {self._scrub(exc)}{hint}") from None
-                delay = min(30.0, 2.0 * 2 ** (attempt - 1)) + random.random()
-                self._sleep(delay)
-        raise LLMError("Gemini API error: retries exhausted")  # pragma: no cover
+                last_error = exc
+                unavailable = _is_retryable(exc) or getattr(exc, "code", None) == 404
+                if not unavailable:
+                    raise self._request_error(exc, current_model) from None
+
+                if not fallback_ready:
+                    try:
+                        self._discover_fallback_models()
+                    except LLMError as discovery_error:
+                        raise LLMError(
+                            f"{self._request_error(exc, current_model)}; "
+                            f"{discovery_error}"
+                        ) from None
+                    fallback_ready = True
+
+                    available_fallbacks = [
+                        name for name in self._fallback_models or []
+                        if name not in attempted_models
+                    ]
+                    if available_fallbacks and current_model == self.model:
+                        primary_attempt_limit = min(self.retries, 2)
+
+                available_fallbacks = [
+                    name for name in self._fallback_models or []
+                    if name not in attempted_models
+                ]
+                may_retry_current = (
+                    _is_retryable(exc)
+                    and current_attempts < primary_attempt_limit
+                    and self._api_calls < config.MAX_LLM_API_CALLS
+                    and (
+                        not available_fallbacks
+                        or self._api_calls < config.MAX_LLM_API_CALLS - min(len(available_fallbacks), 1)
+                    )
+                )
+                if may_retry_current:
+                    delay = min(30.0, 2.0 * 2 ** (current_attempts - 1)) + random.random()
+                    self._sleep(delay)
+                    continue
+
+                if available_fallbacks and self._api_calls < config.MAX_LLM_API_CALLS:
+                    unavailable_model = current_model
+                    current_model = available_fallbacks[0]
+                    attempted_models.add(current_model)
+                    current_attempts = 0
+                    primary_attempt_limit = 1
+                    print(
+                        f"warning: Gemini model {unavailable_model!r} is unavailable; "
+                        f"trying fallback {current_model!r}",
+                        file=sys.stderr,
+                    )
+                    continue
+
+                raise self._request_error(exc, current_model) from None
+
+        if last_error is not None:
+            raise self._request_error(last_error, current_model) from None
+        raise LLMError("Gemini API error: request budget exhausted")
 
     def _scrub(self, exc: BaseException) -> str:
         msg = f"{type(exc).__name__}: {exc}"
@@ -198,11 +311,14 @@ class LLMClient:
         return redact(msg)[:500]
 
     # ----------------------------------------------------------------- parsing
-    def _parse(self, response) -> LLMResponse:
+    def _parse(self, response, model: Optional[str] = None) -> LLMResponse:
         candidates = getattr(response, "candidates", None) or []
         if not candidates:
             block = getattr(getattr(response, "prompt_feedback", None), "block_reason", None)
-            return LLMResponse(text=f"(empty response from model{f': {block}' if block else ''})")
+            return LLMResponse(
+                text=f"(empty response from model{f': {block}' if block else ''})",
+                model=model,
+            )
         cand = candidates[0]
         content = getattr(cand, "content", None)
         parts = (getattr(content, "parts", None) or []) if content else []
@@ -218,5 +334,10 @@ class LLMClient:
                 texts.append(p.text)
         if not parts:
             reason = getattr(cand, "finish_reason", None)
-            return LLMResponse(text=f"(model returned no usable output; finish_reason={reason})")
-        return LLMResponse(text="\n".join(texts).strip(), tool_calls=calls, raw=content)
+            return LLMResponse(
+                text=f"(model returned no usable output; finish_reason={reason})",
+                model=model,
+            )
+        return LLMResponse(
+            text="\n".join(texts).strip(), tool_calls=calls, raw=content, model=model
+        )
