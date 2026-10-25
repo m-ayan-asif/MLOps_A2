@@ -13,6 +13,7 @@ from __future__ import annotations
 import itertools
 import json
 import random
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -54,6 +55,12 @@ _RETRYABLE_NAMES = {
     "ReadTimeout", "ConnectTimeout", "TimeoutException", "ConnectError", "ReadError",
     "RemoteProtocolError", "PoolTimeout", "WriteTimeout",
 }
+
+
+def _fallback_model_key(name: str) -> tuple:
+    version = re.search(r"gemini-(\d+)\.(\d+)", name.lower())
+    major, minor = (map(int, version.groups()) if version else (0, 0))
+    return (-major, -minor, "flash" not in name.lower(), "preview" in name.lower(), name.lower())
 
 
 def _is_retryable(exc: BaseException) -> bool:
@@ -208,14 +215,7 @@ class LLMClient:
                 f"Gemini API error while discovering fallback models: {self._scrub(exc)}"
             ) from None
 
-        self._fallback_models = sorted(
-            set(candidates),
-            key=lambda name: (
-                "flash" not in name.lower(),
-                "preview" in name.lower(),
-                name.lower(),
-            ),
-        )
+        self._fallback_models = sorted(set(candidates), key=_fallback_model_key)
         return self._fallback_models
 
     def _request_error(self, exc: BaseException, model: str) -> LLMError:

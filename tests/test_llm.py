@@ -126,6 +126,7 @@ def test_unavailable_model_falls_back_to_available_flash(monkeypatch, capsys):
     monkeypatch.setattr(config, "MAX_LLM_API_CALLS", 5)
     ok = model_response(types.Part(text="fallback response"))
     available = [
+        SimpleNamespace(name="models/gemini-2.5-flash", supported_actions=["generateContent"]),
         SimpleNamespace(name="models/gemini-pro", supported_actions=["generateContent"]),
         SimpleNamespace(name="models/gemini-3.8-flash", supported_actions=["generateContent"]),
         SimpleNamespace(name="models/gemini-2.5-flash-image", supported_actions=["generateContent"]),
@@ -163,9 +164,29 @@ def test_fallback_tries_each_listed_model_until_one_succeeds(monkeypatch):
     response = c.chat([{"role": "user", "content": "x"}], "sys", tool_schemas.TOOL_DECLARATIONS)
 
     assert response.text == "success"
-    assert response.model == "gemini-3.8-flash-preview"
-    assert fake.models.called_models == ["m", "gemini-3.1-flash", "gemini-3.8-flash-preview"]
+    assert response.model == "gemini-3.1-flash"
+    assert fake.models.called_models == ["m", "gemini-3.8-flash-preview", "gemini-3.1-flash"]
     assert fake.models.list_calls == 1
+
+
+def test_fallback_skips_retired_model_and_tries_next(monkeypatch):
+    monkeypatch.setattr(config, "MAX_LLM_API_CALLS", 5)
+    ok = model_response(types.Part(text="success"))
+    available = [
+        SimpleNamespace(name="models/gemini-3.8-flash", supported_actions=["generateContent"]),
+        SimpleNamespace(name="models/gemini-3.1-flash", supported_actions=["generateContent"]),
+        SimpleNamespace(name="models/gemini-2.5-flash", supported_actions=["generateContent"]),
+    ]
+    c, fake, _ = client(
+        [APIErr(503), APIErr(503), APIErr(404), ok],
+        available_models=available,
+    )
+
+    response = c.chat([{"role": "user", "content": "x"}], "sys", tool_schemas.TOOL_DECLARATIONS)
+
+    assert response.text == "success"
+    assert response.model == "gemini-3.1-flash"
+    assert fake.models.called_models == ["m", "m", "gemini-3.8-flash", "gemini-3.1-flash"]
 
 
 def test_model_fallback_rebuilds_other_models_assistant_turns():

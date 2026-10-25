@@ -180,8 +180,9 @@ The default model is Gemini 3.1 Flash-Lite. Set `LLM_MODEL` in `.env` or the pro
 to use another compatible model. Each audit makes no more than five Gemini API requests total,
 including retries and, if needed, one request to discover fallback models. If the selected model
 is unavailable or overloaded, the agent checks which models available to your API key support
-content generation, tries flash models first, and continues with a fallback within that same
-request limit. Once a fallback succeeds, it is used for the rest of the audit.
+content generation, prioritizes newer model versions and flash variants, skips image models, and
+continues to the next candidate if a listed model is retired. Fallback attempts stay within that
+same request limit. Once a fallback succeeds, it is used for the rest of the audit.
 
 ## Run the tests
 
