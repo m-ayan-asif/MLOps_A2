@@ -1,0 +1,20 @@
+# secrets / local config
+.env
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# agent run outputs (commit only sample_report.json)
+report.json
+trace.jsonl
+.report-*.tmp
+
+# editors / OS
+.idea/
+.vscode/
+.DS_Store
