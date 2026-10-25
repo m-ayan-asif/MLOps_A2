@@ -63,40 +63,59 @@ Observe -> Reason -> Select tool -> Execute tool -> Interpret result -> ... -> R
 | `git_log(n?)` | recent commits |
 | `submit_report(violations)` | ends the audit (handled by the loop) |
 
-## Run it (TA quick start)
+## Setup
 
-You need Python 3.10 or newer, Git, and a Gemini API key. From the project directory, create
-and activate a virtual environment, install the dependencies, then create `.env` from the example.
-Add the API key to `.env`; do not submit or commit that file.
+### Requirements
+
+- Python 3.10 or newer
+- Git installed and available on `PATH` (the agent uses it to clone public repositories)
+- A Gemini API key with access to the configured Gemini model
+
+Run the commands from the directory containing `agent.py` and `requirements.txt` (the repository
+root). Check that a supported Python version and Git are available:
 
 **Windows PowerShell**
 
 ```powershell
-py -3 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-Copy-Item .env.example .env
-notepad .env
-python agent.py --repo https://github.com/owner/repository
+py -3 --version
+git --version
 ```
 
 **macOS, Linux, or WSL**
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-cp .env.example .env
-nano .env
-python agent.py --repo https://github.com/owner/repository
+python3 --version
+git --version
 ```
 
-Replace the example URL with the public GitHub repository to audit. The command writes
-`report.json` and `trace.jsonl` in the current directory. Add `--output path/to/report.json` or
-`--trace path/to/trace.jsonl` to choose other paths. The trace records the agent's tool calls and
-is useful for reviewing what it inspected. The audit uses Gemini 3.1 Flash-Lite by default; set
-`LLM_MODEL` in `.env` to override it.
-Each audit makes no more than five Gemini API requests total, including retries.
+### Install dependencies and configure the API key
+
+Create a virtual environment, install the project dependencies, and copy the example environment
+file. Put your own API key in `.env`; never commit or share that file. `.gitignore` excludes it.
+
+**Windows PowerShell**
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
+notepad .env
+```
+
+If `py -3` selects Python older than 3.10, install a supported Python version and use its
+interpreter to create the environment. Use `.\.venv\Scripts\python.exe` to run the agent and tests
+without activating the environment.
+
+**macOS, Linux, or WSL**
+
+```bash
+python3 -m venv .venv
+./.venv/bin/python -m pip install -r requirements.txt
+cp .env.example .env
+${EDITOR:-nano} .env
+```
+
+The `.env.example` file documents the supported settings:
 
 `.env` variables:
 
@@ -105,21 +124,83 @@ Each audit makes no more than five Gemini API requests total, including retries.
 | `GEMINI_API_KEY` | yes | Google AI Studio API key |
 | `LLM_MODEL` | no | model name; defaults to `gemini-3.1-flash-lite` |
 
-## Usage
+The key can also be supplied as the `GEMINI_API_KEY` environment variable instead of putting it in
+`.env`. The application accepts `GOOGLE_API_KEY` as a fallback. A value set in the process
+environment takes precedence over the value in `.env`.
 
-```bash
-python agent.py --repo https://github.com/<owner>/<repo>
+## Run an audit
+
+**Windows PowerShell**
+
+```powershell
+.\.venv\Scripts\python.exe agent.py --repo https://github.com/owner/repository --output report.json
 ```
 
-Options: `--trace PATH` (tool-call trace, default `trace.jsonl`), `--max-steps N` (default 30).
+**macOS, Linux, or WSL**
+
+```bash
+./.venv/bin/python agent.py --repo https://github.com/owner/repository --output report.json
+```
+
+Replace `owner/repository` with the path of a **public GitHub repository**. Only HTTPS GitHub
+repository URLs are accepted; private repositories and other Git hosts are not supported.
+
+Options:
+
+- `--output PATH`: JSON report path (default: `report.json`)
+- `--trace PATH`: tool-call trace path (default: `trace.jsonl`)
+- `--max-steps N`: maximum LLM turns (default: 30)
+
+For example, to choose both output paths:
+
+**Windows PowerShell**
+
+```powershell
+.\.venv\Scripts\python.exe agent.py --repo https://github.com/owner/repository --output results\audit.json --trace results\audit.jsonl
+```
+
+**macOS, Linux, or WSL**
+
+```bash
+./.venv/bin/python agent.py --repo https://github.com/owner/repository --output results/audit.json --trace results/audit.jsonl
+```
+
+The parent directories for the report and trace are created when needed. The report is written
+only after a completed audit; on a fatal error the program exits nonzero and prints an error to
+stderr. Progress and the model's tool-call reasons are printed to stderr. The JSONL trace records
+tool calls and result previews; it is useful for reviewing what the agent inspected. Do not share
+traces without reviewing them first.
 
 * Exit code `0`: audit completed, report written (with `"violations": []` if none found; stderr then says `Healthy repo: no violations found`).
 * Exit code `1`: fatal error (bad URL, private/missing repo, missing key, API failure...). A clear
   `error: ...` message goes to stderr and no report is written.
-* Progress is printed to stderr. `trace.jsonl` has one JSON line per tool call: step, tool, args,
-  the model's stated reason, and a preview of the result.
+* Exit code `130`: interrupted by the user.
 
-### Report format
+The default model is Gemini 3.1 Flash-Lite. Set `LLM_MODEL` in `.env` or the process environment
+to use another compatible model. Each audit makes no more than five Gemini API requests total,
+including retries.
+
+## Run the tests
+
+Install the dependencies as above, then run the automated tests from the repository root:
+
+**Windows PowerShell**
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest
+```
+
+**macOS, Linux, or WSL**
+
+```bash
+./.venv/bin/python -m pytest
+```
+
+The tests cover the tools (traversal, truncation, redaction, bad regex), URL validation and clone
+safety, report validation and evidence verification, the agent loop with a scripted fake LLM,
+the Gemini wrapper, and CLI exit behaviour. They do not call the network or a real LLM.
+
+## Report format
 
 ```json
 {
@@ -156,26 +237,21 @@ testing, ci_cd, security, configuration, collaboration, build_release.
 * API calls use bounded retries with exponential backoff; all tool failures are returned to the
   model as error strings instead of crashing the loop; clone and git calls have timeouts.
 
-## Tests
-
-```bash
-pytest
-```
-
-Tests cover the tools (traversal, truncation, redaction, bad regex), URL validation and clone
-safety, redaction patterns, report validation/dedupe/verification, the agent loop with a scripted
-fake LLM (dispatch, error handling, step limit, nudge budget, healthy-repo acceptance, unresolved
-credential-evidence rejection, parallel-call cap, trace content),
-the Gemini wrapper (retries, message translation, and total API call budget), and CLI exit
-behaviour. No test calls the
-network or a real LLM.
-
 ## Generating `sample_report.json`
 
-An authentic run output is included in the repository. Regenerate it with:
+`sample_report.json` is an example report produced by the agent. To replace it with output from a
+new audit, run:
+
+**Windows PowerShell**
+
+```powershell
+.\.venv\Scripts\python.exe agent.py --repo https://github.com/owner/repository --output sample_report.json
+```
+
+**macOS, Linux, or WSL**
 
 ```bash
-python agent.py --repo https://github.com/<owner>/<repo> --output sample_report.json
+./.venv/bin/python agent.py --repo https://github.com/owner/repository --output sample_report.json
 ```
 
 ## Limitations
