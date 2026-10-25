@@ -1,4 +1,75 @@
 {
   "repository": "https://github.com/Plazmaz/leaky-repo",
-  "violations": []
+  "violations": [
+    {
+      "rule_id": "SEC-001",
+      "category": "security",
+      "severity": "critical",
+      "file": ".git-credentials",
+      "line": 1,
+      "description": "Committed personal Git credentials in .git-credentials file.",
+      "evidence": ".git-credentials:1: `https://user@example.com:password!#@498@github.com`",
+      "recommendation": "Remove the file from git history and use git credential helpers."
+    },
+    {
+      "rule_id": "SEC-002",
+      "category": "security",
+      "severity": "critical",
+      "file": ".ssh/id_rsa",
+      "line": 1,
+      "description": "Committed SSH private key in .ssh/id_rsa.",
+      "evidence": ".ssh/id_rsa:1: `-----BEGIN RSA PRIVATE KEY-----`",
+      "recommendation": "Remove the private key, revoke it, and rotate credentials."
+    },
+    {
+      "rule_id": "SEC-003",
+      "category": "security",
+      "severity": "critical",
+      "file": "db/.pgpass",
+      "line": 2,
+      "description": "Committed database credentials in .pgpass.",
+      "evidence": "db/.pgpass:2: `localhost:5432:database:root:password`",
+      "recommendation": "Remove the file from git and use environment variables for database configuration."
+    },
+    {
+      "rule_id": "SEC-004",
+      "category": "security",
+      "severity": "high",
+      "file": "web/var/www/.env",
+      "line": 5,
+      "description": "Committed environment variables containing sensitive secrets in .env.",
+      "evidence": "web/var/www/.env:5: `APP_KEY=base64:4StV8PVvCLC6gkJXgGdkYdlWW0suqjb2sj0QvDHx3Hsn`",
+      "recommendation": "Remove the .env file from the repository and use a .env.example template."
+    },
+    {
+      "rule_id": "SEC-005",
+      "category": "security",
+      "severity": "high",
+      "file": "web/django/settings.py",
+      "line": 24,
+      "description": "Committed Django SECRET_KEY in settings.py.",
+      "evidence": "web/django/settings.py:24: `SECRET_KEY = '[REDACTED]'`",
+      "recommendation": "Use an environment variable to store the SECRET_KEY."
+    },
+    {
+      "rule_id": "SEC-006",
+      "category": "security",
+      "severity": "high",
+      "file": "cloud/.s3cfg",
+      "line": 1,
+      "description": "Committed sensitive keys in S3 configuration file.",
+      "evidence": "cloud/.s3cfg:1: `secret_key = [REDACTED] # Sensitive`",
+      "recommendation": "Remove from git and use environment variables or secret management services."
+    },
+    {
+      "rule_id": "REPO-001",
+      "category": "repository_hygiene",
+      "severity": "medium",
+      "file": null,
+      "line": null,
+      "description": "Committed sensitive configuration files that should be ignored (.ssh, .docker, etc.).",
+      "evidence": ".ssh/id_rsa, .docker/.dockercfg, db/.pgpass are all tracked in the repository.",
+      "recommendation": "Update .gitignore to exclude all sensitive and local configuration files."
+    }
+  ]
 }
